@@ -2,6 +2,16 @@ name: Fork packages
 
 on:
   workflow_dispatch:
+    inputs:
+      targets:
+        description: Platforms to build
+        type: choice
+        default: all
+        options: [all, iphone]
+      reuse_unsigned_iphone_run:
+        description: Optionally repackage the unsigned app from an earlier run in this repository
+        type: string
+        required: false
 
 permissions:
   actions: read
@@ -14,6 +24,7 @@ concurrency:
 jobs:
   bundle:
     name: Build desktop JS bundle
+    if: inputs.targets == 'all' && inputs.reuse_unsigned_iphone_run == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     outputs:
@@ -156,18 +167,29 @@ jobs:
           git sparse-checkout set --no-cone '/*' '!/.repos/'
           git checkout --detach FETCH_HEAD
       - name: Setup dependencies
+        if: inputs.reuse_unsigned_iphone_run == ''
         uses: ./.github/actions/setup-ci-deps
         with:
           install-args: --filter=@t3tools/mobile...
       - name: Show Xcode and CocoaPods versions
+        if: inputs.reuse_unsigned_iphone_run == ''
         run: |
           xcodebuild -version
           pod --version
       - name: Generate native project and install pods
+        if: inputs.reuse_unsigned_iphone_run == ''
         working-directory: apps/mobile
         run: |
           vp exec expo prebuild --clean --platform ios --no-install
           (cd ios && pod install)
+      - name: Download existing unsigned app
+        if: inputs.reuse_unsigned_iphone_run != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: iphone-arm64-unsigned
+          path: ${{ runner.temp }}/iphone-input
+          run-id: ${{ inputs.reuse_unsigned_iphone_run }}
+          github-token: ${{ github.token }}
       - name: Build iPhone package
         id: ios
         shell: bash
@@ -175,7 +197,13 @@ jobs:
           IOS_DISTRIBUTION_CERTIFICATE_P12: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12 }}
           IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
           IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
-        run: bash scripts/build-fork-iphone.sh
+          REUSE_UNSIGNED_IPHONE_RUN: ${{ inputs.reuse_unsigned_iphone_run }}
+        run: |
+          if [[ -n "$REUSE_UNSIGNED_IPHONE_RUN" ]]; then
+            bash scripts/build-fork-iphone.sh --from-unsigned-ipa "$RUNNER_TEMP/iphone-input/Agent-Desk-iphone-arm64-unsigned.ipa"
+          else
+            bash scripts/build-fork-iphone.sh
+          fi
       - name: Upload iPhone package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

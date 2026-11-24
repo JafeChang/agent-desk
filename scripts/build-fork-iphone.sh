@@ -1,11 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd apps/mobile
 output="$RUNNER_TEMP/iphone-package"
 mkdir -p "$output"
-
 shopt -s nullglob
+
+package_unsigned_app() {
+  local app="$1" executable staging ipa
+  executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")
+  lipo -verify_arch arm64 "$app/$executable"
+  staging=$(mktemp -d "$RUNNER_TEMP/iphone-payload.XXXXXXXX")
+  mkdir "$staging/Payload"
+  ditto "$app" "$staging/Payload/$(basename "$app")"
+  ipa="$output/Agent-Desk-iphone-arm64-unsigned.ipa"
+  ditto -c -k --norsrc --keepParent "$staging/Payload" "$ipa"
+  unzip -Z1 "$ipa" | awk '/^Payload\/[^/]+\.app\/Info\.plist$/ { found=1 } END { exit !found }'
+  echo 'signing=unsigned' >> "$GITHUB_OUTPUT"
+  echo 'Built an unsigned device IPA. Installation requires Apple signing.' >> "$GITHUB_STEP_SUMMARY"
+}
+
+if [[ "${1:-}" == '--from-unsigned-ipa' ]]; then
+  extracted=$(mktemp -d "$RUNNER_TEMP/iphone-app.XXXXXXXX")
+  ditto -x -k "$2" "$extracted"
+  apps=("$extracted"/Payload/*.app "$extracted"/*.app)
+  if (( ${#apps[@]} != 1 )); then
+    echo 'Expected exactly one iPhone application in the source archive.' >&2
+    exit 1
+  fi
+  package_unsigned_app "${apps[0]}"
+  exit 0
+fi
+
+cd apps/mobile
 workspaces=(ios/*.xcworkspace)
 projects=(ios/*.xcodeproj)
 if (( ${#workspaces[@]} != 1 || ${#projects[@]} != 1 )); then
@@ -24,12 +50,7 @@ if [[ -z "${IOS_DISTRIBUTION_CERTIFICATE_P12:-}${IOS_DISTRIBUTION_CERTIFICATE_PA
     echo 'Expected one arm64 iPhone application.' >&2
     exit 1
   fi
-  staging=$(mktemp -d "$RUNNER_TEMP/iphone-payload.XXXXXXXX")
-  mkdir "$staging/Payload"
-  ditto "${apps[0]}" "$staging/Payload/$(basename "${apps[0]}")"
-  (cd "$staging" && ditto -c -k Payload "$output/Agent-Desk-iphone-arm64-unsigned.ipa")
-  echo 'signing=unsigned' >> "$GITHUB_OUTPUT"
-  echo 'Built an unsigned device IPA. Installation requires Apple signing.' >> "$GITHUB_STEP_SUMMARY"
+  package_unsigned_app "${apps[0]}"
   exit 0
 fi
 
