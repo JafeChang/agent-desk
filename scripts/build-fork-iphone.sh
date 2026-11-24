@@ -7,13 +7,16 @@ shopt -s nullglob
 
 package_unsigned_app() {
   local app="$1" executable staging ipa
-  executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")
-  lipo -verify_arch arm64 "$app/$executable"
+  executable=$(python3 -c 'import plistlib, sys; print(plistlib.loads(open(sys.argv[1], "rb").read())["CFBundleExecutable"])' "$app/Info.plist")
+  if ! file -b "$app/$executable" | grep -Eq 'Mach-O.*arm64'; then
+    echo 'The iPhone app executable must contain arm64 Mach-O code.' >&2
+    exit 1
+  fi
   staging=$(mktemp -d "$RUNNER_TEMP/iphone-payload.XXXXXXXX")
   mkdir "$staging/Payload"
-  ditto "$app" "$staging/Payload/$(basename "$app")"
+  cp -a "$app" "$staging/Payload/"
   ipa="$output/Agent-Desk-iphone-arm64-unsigned.ipa"
-  ditto -c -k --norsrc --keepParent "$staging/Payload" "$ipa"
+  (cd "$staging" && zip -q -r -y "$ipa" Payload)
   unzip -Z1 "$ipa" | awk '/^Payload\/[^/]+\.app\/Info\.plist$/ { found=1 } END { exit !found }'
   echo 'signing=unsigned' >> "$GITHUB_OUTPUT"
   echo 'Built an unsigned device IPA. Installation requires Apple signing.' >> "$GITHUB_STEP_SUMMARY"
@@ -21,7 +24,7 @@ package_unsigned_app() {
 
 if [[ "${1:-}" == '--from-unsigned-ipa' ]]; then
   extracted=$(mktemp -d "$RUNNER_TEMP/iphone-app.XXXXXXXX")
-  ditto -x -k "$2" "$extracted"
+  unzip -q "$2" -d "$extracted"
   apps=("$extracted"/Payload/*.app "$extracted"/*.app)
   if (( ${#apps[@]} != 1 )); then
     echo 'Expected exactly one iPhone application in the source archive.' >&2

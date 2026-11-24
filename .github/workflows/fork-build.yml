@@ -142,7 +142,7 @@ jobs:
 
   iphone:
     name: iPhone arm64
-    runs-on: macos-26
+    runs-on: ${{ inputs.reuse_unsigned_iphone_run != '' && 'ubuntu-24.04' || 'macos-26' }}
     timeout-minutes: 90
     env:
       APP_VARIANT: preview
