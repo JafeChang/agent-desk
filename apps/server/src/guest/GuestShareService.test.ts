@@ -134,8 +134,6 @@ const layerAnalytics = Layer.effectContext(
             Ref.update(recorded, (events) => [...events, { event, ...properties }]).pipe(
               Effect.as(true),
             ),
-          flush: Effect.void,
-          recordOwners: () => Effect.void,
         }),
       ),
     );

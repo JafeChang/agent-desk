@@ -1,0 +1,175 @@
+name: Fork packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: fork-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    name: Build desktop JS bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=t3... --filter=@t3tools/web... --filter=@t3tools/desktop... --filter=@t3tools/scripts...
+      - name: Set preview version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=$(node -p 'require("./apps/desktop/package.json").version.split("-")[0]')
+          version="$base-preview.$(date -u +%Y%m%d).$GITHUB_RUN_NUMBER"
+          node scripts/update-release-package-versions.ts "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Verify privacy settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd apps/server && vp test run src/telemetry/AnalyticsService.test.ts)
+          (cd packages/client-runtime && vp test run src/authorization/remote.test.ts)
+          (cd apps/web && vp test run --project unit src/lib/runtime.test.ts)
+      - name: Build JS bundle
+        run: vp run build:desktop:bundle
+      - name: Upload JS bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: js-bundle
+          path: |
+            apps/server/dist
+            apps/desktop/dist-electron
+          if-no-files-found: error
+          retention-days: 7
+
+  desktop:
+    name: Desktop ${{ matrix.label }}
+    needs: bundle
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            runner: macos-26
+            platform: mac
+            target: dmg
+            arch: arm64
+            rust_target: aarch64-apple-darwin
+            resource_key: darwin-arm64
+            cli_archive: false
+            launch_check: true
+          - label: macOS x64
+            runner: macos-26-intel
+            platform: mac
+            target: dmg
+            arch: x64
+            rust_target: x86_64-apple-darwin
+            resource_key: darwin-x64
+            cli_archive: false
+            launch_check: true
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            target: AppImage
+            arch: x64
+            rust_target: x86_64-unknown-linux-gnu
+            resource_key: linux-x64
+            cli_archive: true
+            launch_check: true
+          - label: Windows x64
+            runner: ubuntu-24.04
+            verify_runner: windows-2025
+            platform: win
+            target: nsis
+            arch: x64
+            rust_target: x86_64-pc-windows-msvc
+            resource_key: win32-x64
+            cli_archive: true
+            launch_check: false
+    uses: ./.github/workflows/release-desktop.yml
+    with:
+      label: ${{ matrix.label }}
+      runner: ${{ matrix.runner }}
+      verify_runner: ${{ matrix.verify_runner || '' }}
+      platform: ${{ matrix.platform }}
+      target: ${{ matrix.target }}
+      arch: ${{ matrix.arch }}
+      rust_target: ${{ matrix.rust_target }}
+      resource_key: ${{ matrix.resource_key }}
+      cli_archive: ${{ matrix.cli_archive }}
+      launch_check: ${{ matrix.launch_check }}
+      version: ${{ needs.bundle.outputs.version }}
+      ref: ${{ github.sha }}
+      release_channel: preview
+      relay_client_tracing: false
+      clerk_publishable_key: ""
+      clerk_jwt_template: ""
+      clerk_cli_oauth_client_id: ""
+      relay_url: ""
+
+  iphone:
+    name: iPhone arm64
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      APP_VARIANT: preview
+      EXPO_NO_GIT_STATUS: "1"
+      EXPO_NO_TELEMETRY: "1"
+      T3CODE_MOBILE_UPDATES_ENABLED: "0"
+      T3CODE_IOS_PERSONAL_TEAM: "1"
+      T3CODE_MOBILE_VERSION: ${{ vars.IOS_APP_VERSION || '2.3.0' }}
+      T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID: ${{ vars.IOS_BUNDLE_IDENTIFIER || 'io.github.jafechang.agentdesk' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/mobile...
+      - name: Show Xcode and CocoaPods versions
+        run: |
+          xcodebuild -version
+          pod --version
+      - name: Generate native project and install pods
+        working-directory: apps/mobile
+        run: |
+          vp exec expo prebuild --clean --platform ios --no-install
+          (cd ios && pod install)
+      - name: Build iPhone package
+        id: ios
+        shell: bash
+        env:
+          IOS_DISTRIBUTION_CERTIFICATE_P12: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_P12 }}
+          IOS_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+        run: bash scripts/build-fork-iphone.sh
+      - name: Upload iPhone package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iphone-arm64-${{ steps.ios.outputs.signing }}
+          path: ${{ runner.temp }}/iphone-package/*.ipa
+          if-no-files-found: error
+          compression-level: 0
