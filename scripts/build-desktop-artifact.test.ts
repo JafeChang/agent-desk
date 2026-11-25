@@ -554,6 +554,32 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
+  it.effect("signs the distribution DMG for signed previews", () =>
+    Effect.gen(function* () {
+      const previewVersion = "0.0.41-preview.20260912.1589";
+      const signed = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        previewVersion,
+        true,
+        false,
+        undefined,
+        undefined,
+      );
+      const unsigned = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        previewVersion,
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      assert.nestedPropertyVal(signed, "dmg.sign", true);
+      assert.notNestedProperty(unsigned, "dmg.sign");
+    }),
+  );
+
   it.effect("names the Electron window class in the Linux desktop entry", () =>
     Effect.gen(function* () {
       const linux = yield* createBuildConfig(

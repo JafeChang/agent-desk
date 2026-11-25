@@ -17,8 +17,8 @@ The first macOS preview was built without Developer ID signing or notarization. 
 can trigger a macOS security alert. For a notarized DMG, run **Fork packages** with target
 `macos-notarized` after configuring `CSC_LINK` (base64 Developer ID Application `.p12`),
 `CSC_KEY_PASSWORD`, `APPLE_API_KEY` (App Store Connect `.p8` contents), `APPLE_API_KEY_ID`, and
-`APPLE_API_ISSUER` in GitHub Actions secrets. The workflow verifies the mounted app with
-`codesign`, `stapler`, and macOS distribution assessment before upload.
+`APPLE_API_ISSUER` in GitHub Actions secrets. The workflow signs, notarizes, and staples the DMG,
+then verifies the disk image and the app inside it before upload.
 
 The iPhone artifact targets physical arm64 devices. A run with no signing configuration produces
 an unsigned IPA. For ad hoc installation on registered iPhones, set the `IOS_BUNDLE_IDENTIFIER`

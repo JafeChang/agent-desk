@@ -2758,8 +2758,10 @@ export function resolveDesktopUpdateChannel(version: string): "latest" | "nightl
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
 
+const forkPreviewVersionPattern = /-preview\.\d{8}\.\d+$/;
+
 export function isDesktopPreviewVersion(version: string): boolean {
-  return /-pr\./.test(version) || /-preview\.\d{8}\.\d+$/.test(version);
+  return /-pr\./.test(version) || forkPreviewVersionPattern.test(version);
 }
 
 export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
@@ -2928,6 +2930,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
 
   if (platform === "mac" && target === "dmg") {
     buildConfig.dmg = {
+      ...(signed && forkPreviewVersionPattern.test(version) ? { sign: true } : {}),
       // Finder caches DMG backgrounds by volume name; give each installer its own.
       title: `${resolveDesktopProductName(version)} ${version} Installer`,
       background: `dmg/dmg-background-${updateChannel}.png`,
