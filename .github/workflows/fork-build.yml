@@ -7,7 +7,7 @@ on:
         description: Platforms to build
         type: choice
         default: all
-        options: [all, iphone]
+        options: [all, macos-notarized, iphone]
       reuse_unsigned_iphone_run:
         description: Optionally repackage the unsigned app from an earlier run in this repository
         type: string
@@ -24,12 +24,31 @@ concurrency:
 jobs:
   bundle:
     name: Build desktop JS bundle
-    if: inputs.targets == 'all' && inputs.reuse_unsigned_iphone_run == ''
+    if: inputs.targets != 'iphone' && inputs.reuse_unsigned_iphone_run == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
+      - name: Verify Apple signing credentials are configured
+        if: inputs.targets == 'macos-notarized'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            [[ -n "${!name}" ]] || missing+=("$name")
+          done
+          if (( ${#missing[@]} )); then
+            echo "::error::Missing Apple signing secrets: ${missing[*]}"
+            exit 1
+          fi
       # The upstream reference tree includes orphan gitlinks. Use the same
       # checkout as release-desktop.yml, which never walks submodules.
       - name: Checkout public fork
@@ -75,7 +94,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  desktop:
+  macos:
     name: Desktop ${{ matrix.label }}
     needs: bundle
     strategy:
@@ -100,6 +119,42 @@ jobs:
             resource_key: darwin-x64
             cli_archive: false
             launch_check: true
+    uses: ./.github/workflows/release-desktop.yml
+    with:
+      label: ${{ matrix.label }}
+      runner: ${{ matrix.runner }}
+      platform: ${{ matrix.platform }}
+      target: ${{ matrix.target }}
+      arch: ${{ matrix.arch }}
+      rust_target: ${{ matrix.rust_target }}
+      resource_key: ${{ matrix.resource_key }}
+      cli_archive: ${{ matrix.cli_archive }}
+      launch_check: ${{ matrix.launch_check }}
+      version: ${{ needs.bundle.outputs.version }}
+      ref: ${{ github.sha }}
+      release_channel: preview
+      require_macos_notarization: ${{ inputs.targets == 'macos-notarized' }}
+      relay_client_tracing: false
+      clerk_publishable_key: ""
+      clerk_jwt_template: ""
+      clerk_cli_oauth_client_id: ""
+      relay_url: ""
+    secrets:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      MACOS_PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
+
+  desktop:
+    name: Desktop ${{ matrix.label }}
+    needs: bundle
+    if: inputs.targets == 'all'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
           - label: Linux x64
             runner: ubuntu-24.04
             platform: linux
@@ -142,6 +197,7 @@ jobs:
 
   iphone:
     name: iPhone arm64
+    if: inputs.targets != 'macos-notarized'
     runs-on: ${{ inputs.reuse_unsigned_iphone_run != '' && 'ubuntu-24.04' || 'macos-26' }}
     timeout-minutes: 90
     env:

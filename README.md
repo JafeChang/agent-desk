@@ -8,11 +8,17 @@ tracing. See [Telemetry and diagnostics](docs/user/telemetry.md) for the data fl
 
 ## Packages
 
-Open [Fork packages](https://github.com/JafeChang/agent-desk/actions/workflows/fork-build.yml) and
-select a successful run to download its artifacts. macOS has Apple silicon and Intel DMGs. Linux
-has an x64 AppImage and CLI archive. Windows has an x64 installer with the Linux WSL runtime.
-Desktop preview packages have no update feed. The mobile package connects directly to a server
-over a local network or tailnet.
+[GitHub Releases](https://github.com/JafeChang/agent-desk/releases) has Apple silicon and Intel DMGs,
+a Linux x64 AppImage and Debian package, and a Windows x64 installer with the Linux WSL runtime.
+[GitHub Actions](https://github.com/JafeChang/agent-desk/actions/workflows/fork-build.yml) also
+provides the Linux CLI archive and iPhone build. Desktop preview packages have no update feed.
+
+The first macOS preview was built without Developer ID signing or notarization. A downloaded copy
+can trigger a macOS security alert. For a notarized DMG, run **Fork packages** with target
+`macos-notarized` after configuring `CSC_LINK` (base64 Developer ID Application `.p12`),
+`CSC_KEY_PASSWORD`, `APPLE_API_KEY` (App Store Connect `.p8` contents), `APPLE_API_KEY_ID`, and
+`APPLE_API_ISSUER` in GitHub Actions secrets. The workflow verifies the mounted app with
+`codesign`, `stapler`, and macOS distribution assessment before upload.
 
 The iPhone artifact targets physical arm64 devices. A run with no signing configuration produces
 an unsigned IPA. For ad hoc installation on registered iPhones, set the `IOS_BUNDLE_IDENTIFIER`
